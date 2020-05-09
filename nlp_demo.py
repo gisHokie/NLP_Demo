@@ -18,12 +18,21 @@ from geopy.exc import GeocoderTimedOut
 
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
+from sklearn import metrics
+from sklearn.preprocessing import StandardScaler
 import numpy as np
 
+import pandas as pd
+
+# may need to use conda to install cartopy: conda install -c conda-forge cartopy
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
 
 import statistics 
 from statistics import mode 
-  
+
+
+
 import csv
 import os
 
@@ -236,9 +245,12 @@ def most_common(List):
 all_locations = [[37.1232245, -78.4927721], [39.7837304, -100.4458825], [31.8160381, -99.5120986], [37.1232245, -78.4927721], [37.1232245, -78.4927721], [37.5385087, -77.43428], [37.9357576, -122.3477486], [-41.3380953, 173.1872264], [39.8286897, -84.8898521], [37.7478572, -84.2946539], [-33.6009721, 150.7496405], [29.5821811, -95.7607832], [42.8091969, -82.7557554], [39.278622, -93.9768876], [41.4998322, -71.660263], [-20.7287264, 143.1414029], [41.8755616, -87.6244212], [32.7762719, -96.7968559], [44.9189206, -123.3158695], [33.9237141, -84.8407732], [29.7589382, -95.3676974], [37.2296566, -80.4136767]]
 
 X = all_locations
-print(X)
+X = StandardScaler().fit_transform(X)
+#print(X)
 
 # K-Means
+print("CALCULATE K-MEANS")
+print(X)
 kmeans = KMeans(n_clusters=3, random_state=0).fit(X)
 print(kmeans.labels_)
 #print(kmeans.predict([[0, 0], [12, 3]]))
@@ -247,13 +259,116 @@ print(kmeans.cluster_centers_)
 mode_cluster = most_common(kmeans.labels_)
 # get the coordinates of item in cluster that most likely represent the area
 like_cluster_pt = kmeans.cluster_centers_[mode_cluster]
-print(like_cluster_pt)
 
-# DBSCAN
+# get the points from cluster with highest mode
+print(mode_cluster)
+cluster_most_labels = np.where(kmeans.labels_ == mode_cluster)
+print(cluster_most_labels)
+
+# Set all coordinates from the cluster label with most items
+cluster_map = pd.DataFrame(all_locations) 
+cluster_most = cluster_map[kmeans.labels_== mode_cluster] #np.extract(kmeans.labels_, X)
+print(cluster_most)
+
+ 
+'''
+### DBSCAN ###
+# https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html
+# https://scikit-learn.org/stable/auto_examples/cluster/plot_dbscan.html#sphx-glr-auto-examples-cluster-plot-dbscan-py
 clustering = DBSCAN(eps=3, min_samples=2).fit(X)
 print(clustering.labels_)
 print(clustering)
 
+core_samples_mask = np.zeros_like(clustering.labels_, dtype=bool)
+core_samples_mask[clustering.core_sample_indices_] = True
+labels = clustering.labels_
+
+# Number of clusters in labels, ignoring noise if present.
+n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+n_noise_ = list(labels).count(-1)
+
+print(core_samples_mask)
+print('Estimated number of clusters: %d' % n_clusters_)
+print('Estimated number of noise points: %d' % n_noise_)
+print("Silhouette Coefficient: %0.3f"
+      % metrics.silhouette_score(X, labels))
+
+
+# Plot DBScan result
+import matplotlib.pyplot as plt
+
+# Black removed and is used for noise instead.
+unique_labels = set(labels)
+colors = [plt.cm.Spectral(each)
+          for each in np.linspace(0, 1, len(unique_labels))]
+for k, col in zip(unique_labels, colors):
+    if k == -1:
+        # Black used for noise.
+        col = [0, 0, 0, 1]
+
+    class_member_mask = (labels == k)
+    print(class_member_mask)
+    xy = X[class_member_mask & core_samples_mask]
+    plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
+             markeredgecolor='k', markersize=14)
+
+    xy = X[class_member_mask & ~core_samples_mask]
+    plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=tuple(col),
+             markeredgecolor='k', markersize=6)
+
+plt.title('Estimated number of clusters: %d' % n_clusters_)
+plt.show()
+
+### END DBSCAN ###
+
+'''
 
 # GEOCODE LEFTOVERS
 # Add Locations to LEFTOVERS and see if we can find a location or many locations
+
+
+# LETS MAP THE DAMN THING
+
+
+# map everything
+# https://matplotlib.org/basemap/api/basemap_api.html
+df = pd.DataFrame(all_locations) 
+#print(df)
+# BBox format is: BBox = ((df.longitude.min(),   df.longitude.max(), df.latitude.min(), df.latitude.max())
+BBox = ((df[1].min(),   df[1].max(),    df[0].min(), df[0].max()))
+#print(BBox)
+
+# https://scitools.org.uk/cartopy/docs/v0.15/matplotlib/intro.html
+# https://scitools.org.uk/cartopy/docs/v0.15/matplotlib/intro.html
+ax = plt.axes(projection=ccrs.PlateCarree())
+map_coast = ax.coastlines()
+map_stock = ax.stock_img()
+
+#https://towardsdatascience.com/easy-steps-to-plot-geographic-data-on-a-map-python-11217859a2db
+ax.scatter(df[1], df[0], zorder=1, alpha= 0.2, c='r', s=50)
+ax.set_title('Plotting All Toponyms')
+ax.set_xlim(BBox[0],BBox[1])
+ax.set_ylim(BBox[2],BBox[3])
+#ax.imshow(coast, zorder=0, extent = BBox, aspect= 'equal')
+
+plt.show()
+
+# Map only K-Means cluster with hight count
+# Need to reset the BBox
+print("MAP KMEANS")
+print(cluster_most)
+dfK = pd.DataFrame(cluster_most)
+print(dfK)
+BBox = ((dfK[1].min(),   dfK[1].max(),    dfK[0].min(), dfK[0].max()))
+print(BBox)
+ax = plt.axes(projection=ccrs.PlateCarree())
+map_coast = ax.coastlines()
+map_stock = ax.stock_img()
+
+ax.scatter(dfK[1], dfK[0], zorder=1, alpha= 0.2, c='r', s=50)
+ax.set_title('Plotting All Toponyms')
+ax.set_xlim(BBox[0],BBox[1])
+ax.set_ylim(BBox[2],BBox[3])
+
+plt.show()
+
